@@ -9,6 +9,8 @@ FROM felddy/foundryvtt:${FOUNDRY_VERSION}
 USER root
 COPY oidc /opt/oidc
 COPY --from=deps /build/node_modules /opt/oidc/node_modules
-RUN chown -R node:node /opt/oidc
-ENV NODE_OPTIONS="--import file:///opt/oidc/shim.mjs"
+RUN chown -R node:node /opt/oidc \
+ && sed -i "s|^ENV_VAR_PASSLIST_REGEX=.*|ENV_VAR_PASSLIST_REGEX='^HOME\$ ^NODE_.+\$ ^OIDC_.+\$ ^TZ\$'|" /home/node/launcher.sh \
+ && grep -q '\^OIDC_' /home/node/launcher.sh
+ENV NODE_OPTIONS="--import=file:///opt/oidc/shim.mjs"
 USER node

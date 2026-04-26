@@ -15,18 +15,62 @@ function readCookie(req, name) {
   return null;
 }
 
-function setStateCookie(res, name, value, secure) {
-  res.cookie(name, value, {
-    httpOnly: true,
-    secure,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 10 * 60 * 1000,
-  });
+function appendSetCookie(res, header) {
+  const existing = res.getHeader("Set-Cookie");
+  if (!existing) {
+    res.setHeader("Set-Cookie", header);
+  } else if (Array.isArray(existing)) {
+    res.setHeader("Set-Cookie", [...existing, header]);
+  } else {
+    res.setHeader("Set-Cookie", [existing, header]);
+  }
 }
 
-function clearStateCookie(res, name, secure) {
-  res.clearCookie(name, { path: "/", httpOnly: true, secure, sameSite: "lax" });
+function buildCookie(name, value, opts) {
+  const parts = [`${name}=${encodeURIComponent(value)}`];
+  if (opts.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(opts.maxAge / 1000)}`);
+  if (opts.path) parts.push(`Path=${opts.path}`);
+  if (opts.httpOnly) parts.push(`HttpOnly`);
+  if (opts.secure) parts.push(`Secure`);
+  if (opts.sameSite) parts.push(`SameSite=${opts.sameSite}`);
+  return parts.join("; ");
+}
+
+function setStateCookie(res, name, value, secure) {
+  appendSetCookie(
+    res,
+    buildCookie(name, value, {
+      httpOnly: true,
+      secure,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 10 * 60 * 1000,
+    }),
+  );
+}
+
+function clearCookie(res, name) {
+  appendSetCookie(res, `${name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
+}
+
+function redirect(res, url) {
+  res.writeHead(302, { Location: url });
+  res.end();
+}
+
+function sendText(res, status, body) {
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end(body);
+}
+
+function sendHtml(res, status, body) {
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(obj));
 }
 
 function safeReturnTo(input) {
@@ -59,10 +103,14 @@ async function loginHandler(cfg, req, res) {
     });
 
     log.debug(`/oidc/login -> redirect ${url.slice(0, 120)}...`);
-    res.redirect(302, url);
+    redirect(res, url);
   } catch (err) {
     log.error("login handler failed:", err);
-    res.status(500).type("text/plain").send(`OIDC login init failed: ${err.message}`);
+    try {
+      sendText(res, 500, `OIDC login init failed: ${err.message}`);
+    } catch (e2) {
+      log.error("error response failed:", e2);
+    }
   }
 }
 
@@ -73,7 +121,7 @@ async function callbackHandler(cfg, req, res) {
     if (!stateData) {
       throw new Error("missing or invalid state cookie");
     }
-    clearStateCookie(res, cfg.cookieName, cfg.cookieSecure);
+    clearCookie(res, cfg.cookieName);
 
     const client = await getOidcClient(cfg);
     const params = client.callbackParams(req);
@@ -104,27 +152,32 @@ async function callbackHandler(cfg, req, res) {
 <p>Ask your administrator to create a Foundry user with the name <code>${escapeHtml(username)}</code>, then sign in again.</p>
 <p><a href="/oidc/login">Try again</a></p>
 </body></html>`;
-      res.status(403).type("text/html").send(html);
+      sendHtml(res, 403, html);
       return;
     }
 
     mintSession(user, res, cfg);
 
     const returnTo = safeReturnTo(stateData.returnTo);
-    res.redirect(302, returnTo);
+    redirect(res, returnTo);
   } catch (err) {
     log.error("callback handler failed:", err);
-    res
-      .status(400)
-      .type("text/plain")
-      .send(`OIDC callback failed: ${err.message}\n\nReturn to /oidc/login to retry.`);
+    try {
+      sendText(
+        res,
+        400,
+        `OIDC callback failed: ${err.message}\n\nReturn to /oidc/login to retry.`,
+      );
+    } catch (e2) {
+      log.error("error response failed:", e2);
+    }
   }
 }
 
 function logoutHandler(cfg, req, res) {
-  res.clearCookie(cfg.foundrySessionCookie, { path: "/" });
-  res.clearCookie(cfg.cookieName, { path: "/" });
-  res.redirect(302, "/");
+  clearCookie(res, cfg.foundrySessionCookie);
+  clearCookie(res, cfg.cookieName);
+  redirect(res, "/");
 }
 
 function joinInterceptor(cfg, req, res, next) {
@@ -135,7 +188,7 @@ function joinInterceptor(cfg, req, res, next) {
   const sessionCookie = readCookie(req, cfg.foundrySessionCookie);
   if (sessionCookie) return next();
   log.debug(`auto-redirect /join -> /oidc/login`);
-  return res.redirect(302, "/oidc/login?returnTo=/game");
+  return redirect(res, "/oidc/login?returnTo=/game");
 }
 
 function escapeHtml(s) {
@@ -152,7 +205,7 @@ export function registerRoutes(app, cfg) {
   app.get("/oidc/callback", (req, res) => callbackHandler(cfg, req, res));
   app.get("/oidc/logout", (req, res) => logoutHandler(cfg, req, res));
   app.get("/oidc/health", (req, res) =>
-    res.type("application/json").send({ ok: true, issuer: cfg.issuer }),
+    sendJson(res, 200, { ok: true, issuer: cfg.issuer }),
   );
 
   app.get("/join", (req, res, next) => joinInterceptor(cfg, req, res, next));
@@ -169,7 +222,7 @@ export function registerRoutes(app, cfg) {
 }
 
 function promoteRouteToFront(app, path) {
-  const stack = app?._router?.stack || app?.router?.stack;
+  const stack = app?._router?.stack;
   if (!Array.isArray(stack)) return;
   let idx = -1;
   for (let i = stack.length - 1; i >= 0; i--) {
