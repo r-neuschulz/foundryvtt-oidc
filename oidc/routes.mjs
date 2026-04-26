@@ -145,10 +145,20 @@ async function callbackHandler(cfg, req, res) {
 
     const role = deriveRole(claims, cfg);
     const user = await ensureUser(username, role);
+    if (user && user._noWorld) {
+      const html = `<!doctype html><html><body style="font-family:sans-serif;max-width:540px;margin:60px auto">
+<h1>No active Foundry world</h1>
+<p>You authenticated successfully as <code>${escapeHtml(username)}</code>, but Foundry has no world loaded yet, so user records cannot be created.</p>
+<p>The Foundry administrator should sign in via the admin key, launch a world, and leave it running. After that, OIDC sign-ins will Just Work.</p>
+<p><a href="/setup">Go to Foundry setup</a> · <a href="/oidc/login">Try again</a></p>
+</body></html>`;
+      sendHtml(res, 503, html);
+      return;
+    }
     if (!user) {
       const html = `<!doctype html><html><body style="font-family:sans-serif;max-width:540px;margin:60px auto">
 <h1>Foundry user not found</h1>
-<p>You authenticated as <code>${escapeHtml(username)}</code> via OIDC, but no matching Foundry user exists, and auto-creation could not run on this Foundry version.</p>
+<p>You authenticated as <code>${escapeHtml(username)}</code> via OIDC, but no matching Foundry user exists and auto-creation failed (see container logs for details).</p>
 <p>Ask your administrator to create a Foundry user with the name <code>${escapeHtml(username)}</code>, then sign in again.</p>
 <p><a href="/oidc/login">Try again</a></p>
 </body></html>`;
@@ -156,7 +166,7 @@ async function callbackHandler(cfg, req, res) {
       return;
     }
 
-    mintSession(user, res, cfg);
+    await mintSession(user, res, cfg);
 
     const returnTo = safeReturnTo(stateData.returnTo);
     redirect(res, returnTo);

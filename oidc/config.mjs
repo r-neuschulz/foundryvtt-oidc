@@ -42,7 +42,7 @@ export function loadConfig() {
     clientId,
     clientSecret,
     redirectUri,
-    scopes: optional("OIDC_SCOPES", "openid profile email groups"),
+    scopes: optional("OIDC_SCOPES", "openid profile email"),
     usernameClaim: optional("OIDC_USERNAME_CLAIM", "preferred_username"),
     autoRedirect: bool("OIDC_AUTO_REDIRECT", true),
     bypassQuery: optional("OIDC_BYPASS_QUERY", "local"),

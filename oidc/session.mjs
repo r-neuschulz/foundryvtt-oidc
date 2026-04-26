@@ -1,112 +1,79 @@
 import crypto from "node:crypto";
 import { log } from "./log.mjs";
 
-function getSessionStore() {
-  const candidates = [
-    () => globalThis.config?.auth?.sessions,
-    () => globalThis.auth?.sessions,
-    () => globalThis.config?.sessions,
-  ];
-  for (const c of candidates) {
-    try {
-      const v = c();
-      if (v) return v;
-    } catch {
-      // try next
+const SESSIONS_MODULE_URL = "file:///home/node/resources/app/dist/sessions.mjs";
+const SESSION_MAX_AGE_MS = 864e5; // matches ClientSessions.COOKIE_MAX_AGE in Foundry
+
+let sessionsSingleton = null;
+
+async function getSessionsSingleton() {
+  if (sessionsSingleton) return sessionsSingleton;
+  try {
+    const m = await import(SESSIONS_MODULE_URL);
+    if (!m?.default?.sessions) {
+      throw new Error("imported sessions module has no `.default.sessions` Map");
     }
+    sessionsSingleton = m.default;
+    log.debug("acquired Foundry sessions singleton");
+    return sessionsSingleton;
+  } catch (e) {
+    log.error(`Failed to import Foundry sessions module: ${e.message}`);
+    return null;
   }
-  return null;
 }
 
-function getCurrentWorldId() {
-  const candidates = [
-    () => globalThis.config?.options?.world,
-    () => globalThis.config?.world?.id,
-    () => globalThis.game?.world?.id,
-    () => globalThis.world?.id,
-  ];
-  for (const c of candidates) {
-    try {
-      const v = c();
-      if (v) return v;
-    } catch {
-      // try next
-    }
-  }
-  return null;
+function appendSetCookie(res, header) {
+  const existing = res.getHeader("Set-Cookie");
+  if (!existing) res.setHeader("Set-Cookie", header);
+  else if (Array.isArray(existing)) res.setHeader("Set-Cookie", [...existing, header]);
+  else res.setHeader("Set-Cookie", [existing, header]);
 }
 
-export function mintSession(user, res, cfg) {
-  const store = getSessionStore();
-  if (!store) {
-    throw new Error(
-      "Foundry session store not found at globalThis.config.auth.sessions. " +
-        "Cannot mint session.",
-    );
+export async function mintSession(user, res, cfg) {
+  const sessions = await getSessionsSingleton();
+  if (!sessions) {
+    throw new Error("Foundry sessions singleton unavailable. Cannot mint session.");
   }
 
   const userId = user.id ?? user._id;
-  if (!userId) {
-    throw new Error("Cannot mint session: user has no id");
-  }
+  if (!userId) throw new Error("Cannot mint session: user has no id");
 
-  const worldId = getCurrentWorldId();
+  const world = globalThis.game?.world;
+  const worldId = world?.id;
   if (!worldId) {
-    log.warn("no current world detected; session may not bind correctly");
+    throw new Error("No active world; cannot bind session to a world.");
   }
 
-  const sessionId = crypto.randomBytes(16).toString("hex");
-
-  const payload = {
-    id: sessionId,
-    userId,
-    user: userId,
-    world: worldId,
-    worldId,
-    created: Date.now(),
-    lastSeen: Date.now(),
+  const id = crypto.randomBytes(12).toString("hex"); // 24 hex chars, matches randomString(24)
+  const sessionData = {
+    id,
+    admin: false,
+    expires: Date.now() + SESSION_MAX_AGE_MS,
+    worlds: { [worldId]: userId },
+    messages: [],
   };
 
-  if (typeof store.create === "function") {
-    try {
-      store.create(sessionId, payload);
-      log.debug(`session minted via store.create: ${sessionId}`);
-    } catch (e) {
-      log.warn(`store.create failed (${e.message}); falling back to direct write`);
-      writeDirect(store, sessionId, payload);
+  sessions.sessions.set(id, sessionData);
+  log.info(`session minted: id=${id} user=${userId} world=${worldId}`);
+
+  // Best-effort: notify world activity layer that this user has logged in
+  try {
+    if (typeof world.onUserLogin === "function") {
+      await world.onUserLogin(user);
+      log.debug(`world.onUserLogin invoked for ${userId}`);
     }
-  } else if (typeof store.set === "function") {
-    try {
-      store.set(sessionId, payload);
-      log.debug(`session minted via store.set: ${sessionId}`);
-    } catch (e) {
-      log.warn(`store.set failed (${e.message}); falling back to direct write`);
-      writeDirect(store, sessionId, payload);
-    }
-  } else {
-    writeDirect(store, sessionId, payload);
+  } catch (e) {
+    log.warn(`world.onUserLogin failed (non-fatal): ${e.message}`);
   }
 
-  res.cookie(cfg.foundrySessionCookie, sessionId, {
-    httpOnly: true,
-    secure: cfg.cookieSecure,
-    sameSite: "lax",
-    path: "/",
-  });
+  const cookieParts = [
+    `${cfg.foundrySessionCookie}=${id}`,
+    `Max-Age=${Math.floor(SESSION_MAX_AGE_MS / 1000)}`,
+    `Path=/`,
+    `SameSite=Strict`,
+  ];
+  if (cfg.cookieSecure) cookieParts.push("Secure");
+  appendSetCookie(res, cookieParts.join("; "));
 
-  log.info(`session issued for user=${userId} world=${worldId}`);
-  return sessionId;
-}
-
-function writeDirect(store, id, payload) {
-  if (store.sessions && typeof store.sessions === "object") {
-    store.sessions[id] = payload;
-    return;
-  }
-  if (store instanceof Map) {
-    store.set(id, payload);
-    return;
-  }
-  // last resort: assume the store is itself the dict
-  store[id] = payload;
+  return id;
 }

@@ -32,7 +32,7 @@ Optional:
 
 | Var | Default | Description |
 |---|---|---|
-| `OIDC_SCOPES` | `openid profile email groups` | Space-separated scopes requested. |
+| `OIDC_SCOPES` | `openid profile email` | Space-separated scopes requested. The `groups` claim does not require a scope of the same name in Keycloak — see GM auto-promotion below. |
 | `OIDC_USERNAME_CLAIM` | `preferred_username` | ID token claim used as the Foundry username. |
 | `OIDC_GROUPS_CLAIM` | `groups` | ID token claim containing the user's groups. |
 | `OIDC_GM_GROUPS` | *(empty)* | Comma-separated group names. Members are auto-assigned the GAMEMASTER role on first login. |
@@ -49,7 +49,7 @@ Optional:
 3. Capability config: **Client authentication: On**, **Authorization: Off**, **Standard flow: On**, all others off.
 4. Login settings: **Valid redirect URIs**: `https://<your-foundry>/oidc/callback`. **Valid post-logout redirect URIs**: `https://<your-foundry>/`.
 5. Save → **Credentials** tab → copy the secret into `OIDC_CLIENT_SECRET`.
-6. (Optional) For GM auto-promotion: Realm → **Groups** → create a group (e.g. `foundry-gms`). Then **Client scopes** → `<client-id>-dedicated` → **Add mapper → Group Membership**: name `groups`, token claim `groups`, full path **off**, add to ID token: **on**. Add the same group claim mapper to the access token if your downstream cares.
+6. (Optional) For GM auto-promotion: Realm → **Groups** → create a group (e.g. `foundry-gms`). Then on the foundry-vtt client → **Client scopes** → `foundry-vtt-dedicated` → **Add mapper → By configuration → Group Membership**: name `groups`, token claim `groups`, **Full group path: Off**, **Add to ID token: On**. No scope-name change needed; the claim appears in the ID token under the requested standard scopes.
 
 That's the whole IdP-side setup. Foundry-side, all you do is set the four env vars.
 

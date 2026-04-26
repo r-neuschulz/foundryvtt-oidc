@@ -20,102 +20,124 @@ export function deriveRole(claims, cfg) {
   return ROLE.PLAYER;
 }
 
-function getCollections() {
-  const candidates = [
-    () => globalThis.game?.users,
-    () => globalThis.config?.game?.users,
-    () => globalThis.config?.collections?.users,
-    () => globalThis.config?.db?.users,
-  ];
-  for (const c of candidates) {
+function getUserClass() {
+  return globalThis.config?.db?.User || null;
+}
+
+export async function findUserByName(name) {
+  const cls = getUserClass();
+  if (!cls) return null;
+  const lower = name.toLowerCase();
+
+  if (typeof cls.findOne === "function") {
     try {
-      const v = c();
-      if (v) return v;
-    } catch {
-      // try next
+      const u = await cls.findOne({ name });
+      if (u) return u;
+    } catch (e) {
+      log.debug(`User.findOne({name}) failed: ${e.message}`);
     }
   }
+
+  if (typeof cls.find === "function") {
+    try {
+      const all = await cls.find({});
+      if (Array.isArray(all)) {
+        const u = all.find((x) => (x?.name || "").toLowerCase() === lower);
+        if (u) return u;
+      }
+    } catch (e) {
+      log.debug(`User.find({}) failed: ${e.message}`);
+    }
+  }
+
   return null;
 }
 
-export function findUserByName(name) {
-  const users = getCollections();
-  if (!users) return null;
-  try {
-    if (typeof users.getName === "function") {
-      const u = users.getName(name);
-      if (u) return u;
-    }
-    if (typeof users.find === "function") {
-      const u = users.find(
-        (x) => (x?.name || "").toLowerCase() === name.toLowerCase(),
-      );
-      if (u) return u;
-    }
-    if (typeof users.contents !== "undefined") {
-      const u = users.contents.find?.(
-        (x) => (x?.name || "").toLowerCase() === name.toLowerCase(),
-      );
-      if (u) return u;
-    }
-    if (typeof users[Symbol.iterator] === "function") {
-      for (const u of users) {
-        if ((u?.name || "").toLowerCase() === name.toLowerCase()) return u;
-      }
-    }
-  } catch (e) {
-    log.warn(`findUserByName failed: ${e.message}`);
-  }
-  return null;
+function isWorldActive() {
+  const cls = getUserClass();
+  if (!cls) return false;
+  if (typeof cls.connected !== "undefined" && cls.connected === false) return false;
+  if (typeof cls.ready !== "undefined" && cls.ready === false) return false;
+  if (typeof globalThis.game?.active !== "undefined" && globalThis.game.active === false) return false;
+  return true;
 }
 
 export async function ensureUser(name, role) {
-  const existing = findUserByName(name);
+  if (!isWorldActive()) {
+    log.error(
+      `No active Foundry world. The User database is unavailable until a world is loaded. ` +
+        `Sign in to Foundry as admin once and launch a world; subsequent OIDC logins will work.`,
+    );
+    return { _noWorld: true };
+  }
+
+  const existing = await findUserByName(name);
   if (existing) {
-    log.debug(`existing user matched: name=${name} id=${existing.id ?? existing._id}`);
+    log.info(`existing user matched: name=${name} id=${existing.id ?? existing._id}`);
     return existing;
   }
 
-  const userClass = globalThis.User || globalThis.config?.User;
-  if (userClass && typeof userClass.create === "function") {
-    try {
-      const u = await userClass.create({ name, role });
-      log.info(`auto-created Foundry user: name=${name} role=${role}`);
-      return u;
-    } catch (e) {
-      log.warn(`User.create failed: ${e.message}`);
-    }
+  const cls = getUserClass();
+  if (!cls?.create) {
+    log.error(
+      `Cannot auto-create user '${name}': config.db.User.create not available. ` +
+        `Set OIDC_DEBUG=1 to introspect global state.`,
+    );
+    return null;
   }
 
-  const users = getCollections();
-  if (users && typeof users.create === "function") {
-    try {
-      const u = await users.create({ name, role });
-      log.info(`auto-created Foundry user via collection: name=${name} role=${role}`);
-      return u;
-    } catch (e) {
-      log.warn(`users.create failed: ${e.message}`);
-    }
+  try {
+    const u = await cls.create({ name, role });
+    log.info(`auto-created Foundry user: name=${name} role=${role} id=${u?.id ?? u?._id}`);
+    return u;
+  } catch (e) {
+    log.error(`User.create failed for '${name}':`, e);
+    return null;
   }
+}
 
-  log.error(
-    `Cannot auto-create user '${name}': no Foundry User API found in this version. ` +
-      `Admin must create the user in Foundry's /players UI. ` +
-      `Set OIDC_DEBUG=1 to introspect global state.`,
-  );
-  return null;
+function shape(o, depth = 1) {
+  if (o == null) return null;
+  if (typeof o !== "object" && typeof o !== "function") return typeof o;
+  const keys = Object.keys(o).slice(0, 50);
+  const proto = Object.getPrototypeOf(o);
+  const protoKeys = proto && proto !== Object.prototype && proto !== Function.prototype
+    ? Object.getOwnPropertyNames(proto).filter((n) => n !== "constructor").slice(0, 40)
+    : [];
+  return {
+    ctor: o?.constructor?.name,
+    keys,
+    protoKeys,
+    size: o?.size ?? o?.length,
+  };
 }
 
 export function dumpGlobals() {
-  const out = {
-    hasGame: !!globalThis.game,
-    hasConfig: !!globalThis.config,
-    hasUser: !!globalThis.User,
-    configKeys: globalThis.config ? Object.keys(globalThis.config).slice(0, 30) : null,
-    gameKeys: globalThis.game ? Object.keys(globalThis.game).slice(0, 30) : null,
-  };
-  log.debug("globals:", out);
-  return out;
+  try {
+    const g = globalThis;
+    const out = {
+      hasGame: !!g.game,
+      hasConfig: !!g.config,
+      hasUser: !!g.User,
+      hasFoundry: !!g.foundry,
+      configKeys: g.config ? Object.keys(g.config).slice(0, 40) : null,
+      gameKeys: g.game ? Object.keys(g.game).slice(0, 40) : null,
+      foundryKeys: g.foundry ? Object.keys(g.foundry).slice(0, 40) : null,
+      gameUsers: shape(g.game?.users),
+      configDb: shape(g.config?.db),
+      configDbUser: shape(g.config?.db?.User),
+      configDbUsers: shape(g.config?.db?.users),
+      foundryDocuments: g.foundry?.documents
+        ? Object.keys(g.foundry.documents).slice(0, 30)
+        : null,
+      foundryDocumentsUser: shape(g.foundry?.documents?.User),
+    };
+    log.info("dumpGlobals:", out);
+    return out;
+  } catch (e) {
+    log.error("dumpGlobals failed:", e);
+    return null;
+  }
 }
 
 export { ROLE };
