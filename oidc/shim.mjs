@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { loadConfig } from "./config.mjs";
 import { getOidcClient } from "./client.mjs";
-import { registerRoutes } from "./routes.mjs";
+import { registerRoutes, dumpStack } from "./routes.mjs";
 import { log } from "./log.mjs";
 
 const POLL_INTERVAL_MS = 100;
@@ -194,7 +194,9 @@ async function bootstrap() {
   log.info(`Express app located. has _router=${!!app._router}`);
 
   try {
+    if (cfg.debug) dumpStack(app, "stack BEFORE register");
     registerRoutes(app, cfg);
+    if (cfg.debug) dumpStack(app, "stack AFTER register+promote");
     log.info("OIDC shim active.");
   } catch (err) {
     log.error("route registration failed:", err);

@@ -193,11 +193,14 @@ function logoutHandler(cfg, req, res) {
 function joinInterceptor(cfg, req, res, next) {
   if (req.method !== "GET") return next();
   if (!cfg.autoRedirect) return next();
-  if (req.query && req.query[cfg.bypassQuery] !== undefined) return next();
-  if (req.query && req.query.from === "oidc") return next();
+  // We sit before Express's `query` middleware, so req.query is undefined here.
+  // Parse the query off req.url ourselves.
+  const url = new URL(req.url, "http://x");
+  if (url.searchParams.has(cfg.bypassQuery)) return next();
+  if (url.searchParams.get("from") === "oidc") return next();
   const sessionCookie = readCookie(req, cfg.foundrySessionCookie);
   if (sessionCookie) return next();
-  log.debug(`auto-redirect /join -> /oidc/login`);
+  log.debug(`/join -> 302 /oidc/login`);
   return redirect(res, "/oidc/login?returnTo=/game");
 }
 
@@ -247,4 +250,19 @@ function promoteRouteToFront(app, path) {
   }
   const [layer] = stack.splice(idx, 1);
   stack.unshift(layer);
+}
+
+export function dumpStack(app, label = "stack") {
+  const stack = app?._router?.stack;
+  if (!Array.isArray(stack)) {
+    log.warn(`${label}: no _router.stack`);
+    return;
+  }
+  log.info(`${label}: ${stack.length} layers`);
+  for (let i = 0; i < Math.min(stack.length, 25); i++) {
+    const l = stack[i];
+    log.info(
+      `  [${i}] name=${l?.name} route=${l?.route?.path ?? "(none)"} regexp=${String(l?.regexp).slice(0, 60)}`,
+    );
+  }
 }
