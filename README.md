@@ -62,7 +62,7 @@ That's the whole IdP-side setup. Foundry-side, all you do is set the four env va
 
 ## How it works
 
-1. The image is `FROM felddy/foundryvtt:release`. We add `/opt/oidc/` containing the shim + its single npm dep (`openid-client`), and set `NODE_OPTIONS=--import file:///opt/oidc/shim.mjs`.
+1. The image is `FROM felddy/foundryvtt:13` (Foundry v13 latest). We add `/opt/oidc/` containing the shim + its single npm dep (`openid-client`), and set `NODE_OPTIONS=--import file:///opt/oidc/shim.mjs`.
 2. Node loads `shim.mjs` *before* Foundry's `main.mjs`. The shim immediately starts polling `globalThis.config.express` (set by Foundry during boot).
 3. Once the Express app is up, the shim:
    - Registers `GET /oidc/login`, `GET /oidc/callback`, `GET /oidc/logout`, `GET /oidc/health`.
@@ -74,7 +74,7 @@ The shim never touches Foundry's source files. If anything breaks, the OIDC inte
 
 ## Caveats
 
-- **Foundry version targeting.** Tested anchors: `globalThis.config.express`, `globalThis.config.auth.sessions`, the Foundry user/role schema. These have been stable since v11 but are not officially documented APIs. Set `OIDC_DEBUG=1` if something doesn't bind correctly and file an issue with the log output.
+- **Foundry version targeting.** Default is **Foundry v13** via the `13` tag. To target a different major, build with `--build-arg FOUNDRY_VERSION=12` (or any tag from felddy/foundryvtt). v14 has been observed *not* to expose `globalThis.config.express` in the same shape — v14 support is currently broken. The shim's anchors (`globalThis.config.express`, `globalThis.config.auth.sessions`, the Foundry user/role schema) have been stable through v11–v13 but are not officially documented APIs. Set `OIDC_DEBUG=1` if something doesn't bind correctly and file an issue with the log output.
 - **Auto-creation is best-effort.** The shim probes several plausible User-creation paths and falls back to a clear error page if none work. Once a user has been created (manually or automatically), subsequent logins are straightforward.
 - **Foundry license.** This image inherits felddy's licensing flow (you provide your Foundry username/password or a presigned release URL via build args / env vars). It downloads Foundry binaries the same way the upstream image does; we ship no Foundry code.
 - **EULA.** This image does not modify Foundry's distributed code. It loads alongside Foundry's process and registers additional Express routes, similar to how a Foundry module would extend the client. Whether your deployment is acceptable to the Foundry EULA is your call.

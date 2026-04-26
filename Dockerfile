@@ -1,4 +1,4 @@
-ARG FOUNDRY_VERSION=release
+ARG FOUNDRY_VERSION=13
 
 FROM node:24-alpine AS deps
 WORKDIR /build

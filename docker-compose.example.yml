@@ -4,7 +4,7 @@ services:
     build:
       context: .
       args:
-        FOUNDRY_VERSION: release
+        FOUNDRY_VERSION: "13"
     # ...or pull the published image (after the GHCR workflow has run):
     # image: ghcr.io/r-neuschulz/foundryvtt-oidc:latest
     container_name: foundry
