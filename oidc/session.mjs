@@ -29,7 +29,7 @@ function appendSetCookie(res, header) {
   else res.setHeader("Set-Cookie", [existing, header]);
 }
 
-export async function mintSession(user, res, cfg) {
+export async function mintSession(user, res, cfg, { admin = false } = {}) {
   const sessions = await getSessionsSingleton();
   if (!sessions) {
     throw new Error("Foundry sessions singleton unavailable. Cannot mint session.");
@@ -47,14 +47,14 @@ export async function mintSession(user, res, cfg) {
   const id = crypto.randomBytes(12).toString("hex"); // 24 hex chars, matches randomString(24)
   const sessionData = {
     id,
-    admin: false,
+    admin: !!admin,
     expires: Date.now() + SESSION_MAX_AGE_MS,
     worlds: { [worldId]: userId },
     messages: [],
   };
 
   sessions.sessions.set(id, sessionData);
-  log.info(`session minted: id=${id} user=${userId} world=${worldId}`);
+  log.info(`session minted: id=${id} user=${userId} world=${worldId} admin=${!!admin}`);
 
   // Best-effort: notify world activity layer that this user has logged in
   try {

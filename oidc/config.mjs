@@ -47,6 +47,7 @@ export function loadConfig() {
     autoRedirect: bool("OIDC_AUTO_REDIRECT", true),
     bypassQuery: optional("OIDC_BYPASS_QUERY", "local"),
     gmGroups: csv("OIDC_GM_GROUPS"),
+    adminGroups: csv("OIDC_ADMIN_GROUPS"),
     groupsClaim: optional("OIDC_GROUPS_CLAIM", "groups"),
     cookieName: optional("OIDC_COOKIE_NAME", "oidc_state"),
     cookieSecure: bool("OIDC_COOKIE_SECURE", true),

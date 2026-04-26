@@ -36,6 +36,7 @@ Optional:
 | `OIDC_USERNAME_CLAIM` | `preferred_username` | ID token claim used as the Foundry username. |
 | `OIDC_GROUPS_CLAIM` | `groups` | ID token claim containing the user's groups. |
 | `OIDC_GM_GROUPS` | *(empty)* | Comma-separated group names. Members are auto-assigned the GAMEMASTER role on first login. |
+| `OIDC_ADMIN_GROUPS` | *(empty)* | Comma-separated group names. Members get a Foundry **server-admin** session (skips the admin-key dialog when launching/swapping worlds, accessing /setup, etc.). Independent of GM role; admin status is per session, GM role is per user. |
 | `OIDC_AUTO_REDIRECT` | `true` | If true, `GET /join` redirects to `/oidc/login` automatically. Disable to keep Foundry's native form. |
 | `OIDC_BYPASS_QUERY` | `local` | Query parameter that bypasses the auto-redirect: `/join?local=1` shows the native form (escape hatch for admins). |
 | `OIDC_COOKIE_NAME` | `oidc_state` | Name of the signed cookie holding state/nonce/PKCE between login and callback. |

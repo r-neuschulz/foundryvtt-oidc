@@ -8,16 +8,23 @@ const ROLE = {
   GAMEMASTER: 4,
 };
 
-export function deriveRole(claims, cfg) {
+function claimsHasGroup(claims, cfg, names) {
+  if (!names || names.length === 0) return false;
   const groups = claims[cfg.groupsClaim];
-  if (Array.isArray(groups) && cfg.gmGroups.length > 0) {
-    for (const g of cfg.gmGroups) {
-      if (groups.includes(g) || groups.includes(`/${g}`)) {
-        return ROLE.GAMEMASTER;
-      }
-    }
+  if (!Array.isArray(groups)) return false;
+  for (const g of names) {
+    if (groups.includes(g) || groups.includes(`/${g}`)) return true;
   }
+  return false;
+}
+
+export function deriveRole(claims, cfg) {
+  if (claimsHasGroup(claims, cfg, cfg.gmGroups)) return ROLE.GAMEMASTER;
   return ROLE.PLAYER;
+}
+
+export function deriveAdmin(claims, cfg) {
+  return claimsHasGroup(claims, cfg, cfg.adminGroups);
 }
 
 function getUserClass() {
