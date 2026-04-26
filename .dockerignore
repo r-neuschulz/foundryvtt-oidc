@@ -1,0 +1,7 @@
+.git
+.github
+README.md
+LICENSE
+docker-compose.example.yml
+oidc/node_modules
+**/.DS_Store

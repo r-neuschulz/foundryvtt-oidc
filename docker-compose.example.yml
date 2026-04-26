@@ -1,0 +1,40 @@
+services:
+  foundry:
+    # Either build locally:
+    build:
+      context: .
+      args:
+        FOUNDRY_VERSION: release
+    # ...or pull the published image (after the GHCR workflow has run):
+    # image: ghcr.io/r-neuschulz/foundryvtt-oidc:latest
+    container_name: foundry
+    restart: unless-stopped
+    init: true
+    hostname: foundry
+    environment:
+      # --- felddy/foundryvtt base config ---
+      # Either FOUNDRY_USERNAME/PASSWORD (license auto-download), or a presigned URL.
+      FOUNDRY_USERNAME: ${FOUNDRY_USERNAME}
+      FOUNDRY_PASSWORD: ${FOUNDRY_PASSWORD}
+      FOUNDRY_ADMIN_KEY: ${FOUNDRY_ADMIN_KEY}
+      FOUNDRY_HOSTNAME: foundry.example.com
+      FOUNDRY_PROXY_SSL: "true"
+      FOUNDRY_PROXY_PORT: "443"
+
+      # --- OIDC shim config (the only OIDC-specific knobs) ---
+      OIDC_ISSUER: https://keycloak.example.com/realms/foundry
+      OIDC_CLIENT_ID: foundry-vtt
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_REDIRECT_URI: https://foundry.example.com/oidc/callback
+      # Optional knobs, sensible defaults:
+      # OIDC_SCOPES: "openid profile email groups"
+      # OIDC_USERNAME_CLAIM: preferred_username
+      # OIDC_GM_GROUPS: foundry-gms,dms
+      # OIDC_GROUPS_CLAIM: groups
+      # OIDC_AUTO_REDIRECT: "true"   # /join auto-redirects to /oidc/login
+      # OIDC_BYPASS_QUERY: local     # /join?local=1 falls back to native login (admin escape hatch)
+      # OIDC_DEBUG: "1"
+    ports:
+      - "30000:30000"
+    volumes:
+      - ./data:/data
