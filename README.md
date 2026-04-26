@@ -58,8 +58,8 @@ That's the whole IdP-side setup. Foundry-side, all you do is set the four env va
 
 - The OIDC `preferred_username` claim (configurable via `OIDC_USERNAME_CLAIM`) maps to the Foundry user's `name` field.
 - On first login, the shim attempts to **auto-create** the matching Foundry user using whichever User-creation API is available in the running Foundry version. If the Foundry version doesn't expose a usable API, the shim shows a friendly error page asking the admin to create the user manually in `/players` once. Subsequent logins for that user then work without intervention. (See *Caveats* below.)
-- Members of any group listed in `OIDC_GM_GROUPS` get role `GAMEMASTER` (4); everyone else defaults to `PLAYER` (1).
-- Role re-evaluation happens only at user-creation time. Promoting an existing Foundry user to GM after the fact is still done in Foundry's `/players` UI — that's a deliberate scope choice (the shim never *demotes* a user it didn't create, to avoid clobbering manual admin changes).
+- Members of any group listed in `OIDC_GM_GROUPS` get role `GAMEMASTER` (4); everyone else defaults to `PLAYER` (1) on first login.
+- On every subsequent OIDC login, the shim **elevates** the existing user's role to match their group membership if the group implies a higher role. The shim **never demotes** — a Foundry user manually promoted via `/players` keeps that role even if the IdP says otherwise. This protects against IdP misconfiguration accidentally locking your GM out.
 
 ## How it works
 

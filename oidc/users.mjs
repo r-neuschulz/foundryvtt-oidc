@@ -69,6 +69,46 @@ function isWorldActive() {
   return true;
 }
 
+async function elevateUserRole(existing, targetRole) {
+  const currentRole = existing?.role ?? 0;
+  if (typeof targetRole !== "number" || targetRole <= currentRole) return false;
+
+  // Preferred: full Document.update() lifecycle (broadcasts, hooks, persistence)
+  if (typeof existing.update === "function") {
+    try {
+      await existing.update({ role: targetRole });
+      log.info(
+        `elevated user ${existing.name}: role ${currentRole} -> ${targetRole} (via update)`,
+      );
+      return true;
+    } catch (e) {
+      log.warn(`existing.update({role}) failed: ${e.message}`);
+    }
+  }
+
+  // Fallback: mutate source and persist directly (no socket broadcast, but role flips)
+  if (
+    typeof existing.updateSource === "function" &&
+    typeof existing.save === "function"
+  ) {
+    try {
+      existing.updateSource({ role: targetRole });
+      await existing.save();
+      log.info(
+        `elevated user ${existing.name}: role ${currentRole} -> ${targetRole} (via updateSource+save)`,
+      );
+      return true;
+    } catch (e) {
+      log.warn(`updateSource+save failed: ${e.message}`);
+    }
+  }
+
+  log.warn(
+    `could not elevate role for '${existing.name}' (current=${currentRole}, target=${targetRole}); admin must promote manually in /players`,
+  );
+  return false;
+}
+
 export async function ensureUser(name, role) {
   if (!isWorldActive()) {
     log.error(
@@ -81,6 +121,7 @@ export async function ensureUser(name, role) {
   const existing = await findUserByName(name);
   if (existing) {
     log.info(`existing user matched: name=${name} id=${existing.id ?? existing._id}`);
+    await elevateUserRole(existing, role);
     return existing;
   }
 
