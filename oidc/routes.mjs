@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
 import { generators, getOidcClient } from "./client.mjs";
 import { signState, verifyState } from "./state.mjs";
-import { ensureUser, deriveRole, deriveAdmin, dumpGlobals } from "./users.mjs";
+import {
+  ensureUser,
+  deriveRole,
+  deriveAdmin,
+  syncUserAttributes,
+  dumpGlobals,
+} from "./users.mjs";
 import { mintSession } from "./session.mjs";
 import { log } from "./log.mjs";
 
@@ -167,6 +173,7 @@ async function callbackHandler(cfg, req, res) {
     }
 
     const admin = deriveAdmin(claims, cfg);
+    await syncUserAttributes(user, claims, cfg);
     await mintSession(user, res, cfg, { admin });
 
     const returnTo = safeReturnTo(stateData.returnTo);

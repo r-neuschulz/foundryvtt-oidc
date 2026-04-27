@@ -37,6 +37,10 @@ Optional:
 | `OIDC_GROUPS_CLAIM` | `groups` | ID token claim containing the user's groups. |
 | `OIDC_GM_GROUPS` | *(empty)* | Comma-separated group names. Members are auto-assigned the GAMEMASTER role on first login. |
 | `OIDC_ADMIN_GROUPS` | *(empty)* | Comma-separated group names. Members get a Foundry **server-admin** session (skips the admin-key dialog when launching/swapping worlds, accessing /setup, etc.). Independent of GM role; admin status is per session, GM role is per user. |
+| `OIDC_SYNC_ATTRS` | `true` | On every OIDC login, sync user attributes from claims into the Foundry user document (avatar/pronouns/color). Set to `false` to disable all attribute sync. |
+| `OIDC_AVATAR_CLAIM` | `picture` | ID-token claim to copy to the Foundry `avatar` field (standard OIDC claim; usually a URL). Set empty to skip. |
+| `OIDC_PRONOUNS_CLAIM` | *(empty)* | ID-token claim to copy to the Foundry `pronouns` field. Configure a custom Keycloak user attribute + claim mapper of the same name. |
+| `OIDC_COLOR_CLAIM` | *(empty)* | ID-token claim to copy to the Foundry `color` field. Must be a `#rrggbb` hex string; non-matching values are ignored with a warning. |
 | `OIDC_AUTO_REDIRECT` | `true` | If true, `GET /join` redirects to `/oidc/login` automatically. Disable to keep Foundry's native form. |
 | `OIDC_BYPASS_QUERY` | `local` | Query parameter that bypasses the auto-redirect: `/join?local=1` shows the native form (escape hatch for admins). |
 | `OIDC_COOKIE_NAME` | `oidc_state` | Name of the signed cookie holding state/nonce/PKCE between login and callback. |

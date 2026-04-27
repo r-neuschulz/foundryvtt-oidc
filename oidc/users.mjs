@@ -69,40 +69,77 @@ function isWorldActive() {
   return true;
 }
 
-async function elevateUserRole(existing, targetRole) {
-  const currentRole = existing?.role ?? 0;
-  if (typeof targetRole !== "number" || targetRole <= currentRole) return false;
-
-  // Preferred: full Document.update() lifecycle (broadcasts, hooks, persistence)
+async function applyUserChanges(existing, changes) {
+  if (!Object.keys(changes).length) return false;
   if (typeof existing.update === "function") {
     try {
-      await existing.update({ role: targetRole });
-      log.info(
-        `elevated user ${existing.name}: role ${currentRole} -> ${targetRole} (via update)`,
-      );
+      await existing.update(changes);
       return true;
     } catch (e) {
-      log.warn(`existing.update({role}) failed: ${e.message}`);
+      log.debug(`existing.update(${JSON.stringify(Object.keys(changes))}) failed: ${e.message}`);
     }
   }
-
-  // Fallback: mutate source and persist directly (no socket broadcast, but role flips)
   if (
     typeof existing.updateSource === "function" &&
     typeof existing.save === "function"
   ) {
     try {
-      existing.updateSource({ role: targetRole });
+      existing.updateSource(changes);
       await existing.save();
-      log.info(
-        `elevated user ${existing.name}: role ${currentRole} -> ${targetRole} (via updateSource+save)`,
-      );
       return true;
     } catch (e) {
       log.warn(`updateSource+save failed: ${e.message}`);
     }
   }
+  return false;
+}
 
+function isValidHexColor(s) {
+  return typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
+}
+
+export async function syncUserAttributes(existing, claims, cfg) {
+  if (!cfg.syncAttrs) return false;
+  const changes = {};
+
+  if (cfg.avatarClaim) {
+    const v = claims[cfg.avatarClaim];
+    if (typeof v === "string" && v && v !== existing.avatar) changes.avatar = v;
+  }
+  if (cfg.pronounsClaim) {
+    const v = claims[cfg.pronounsClaim];
+    if (typeof v === "string" && v !== (existing.pronouns ?? "")) changes.pronouns = v;
+  }
+  if (cfg.colorClaim) {
+    const v = claims[cfg.colorClaim];
+    if (isValidHexColor(v) && v.toLowerCase() !== (existing.color ?? "").toLowerCase()) {
+      changes.color = v;
+    } else if (v && !isValidHexColor(v)) {
+      log.debug(`color claim '${v}' is not a valid #rrggbb hex; ignored`);
+    }
+  }
+
+  if (!Object.keys(changes).length) return false;
+  const ok = await applyUserChanges(existing, changes);
+  if (ok) {
+    log.info(`synced attrs for ${existing.name}: ${Object.keys(changes).join(", ")}`);
+  } else {
+    log.warn(`could not sync attrs for ${existing.name}`);
+  }
+  return ok;
+}
+
+async function elevateUserRole(existing, targetRole) {
+  const currentRole = existing?.role ?? 0;
+  if (typeof targetRole !== "number" || targetRole <= currentRole) return false;
+
+  const ok = await applyUserChanges(existing, { role: targetRole });
+  if (ok) {
+    log.info(
+      `elevated user ${existing.name}: role ${currentRole} -> ${targetRole}`,
+    );
+    return true;
+  }
   log.warn(
     `could not elevate role for '${existing.name}' (current=${currentRole}, target=${targetRole}); admin must promote manually in /players`,
   );
