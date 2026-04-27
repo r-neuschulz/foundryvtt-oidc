@@ -6,6 +6,7 @@ import {
   deriveRole,
   deriveAdmin,
   syncUserAttributes,
+  lockUserPassword,
 } from "./users.mjs";
 import { mintSession } from "./session.mjs";
 import { getAvatarUrl } from "./avatar-map.mjs";
@@ -127,6 +128,7 @@ export async function callbackHandler(cfg, req, res) {
     const user = result.user;
 
     const admin = deriveAdmin(claims, cfg);
+    await lockUserPassword(user);
     await syncUserAttributes(user, claims, cfg);
     await mintSession(user, res, cfg, { admin });
 

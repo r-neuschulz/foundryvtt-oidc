@@ -1,5 +1,17 @@
+import crypto from "node:crypto";
 import { log } from "./log.mjs";
 import { setAvatarUrl } from "./avatar-map.mjs";
+
+// Foundry's User document has an optional password field. Foundry's
+// /join POST authenticates by (userId, password) — and if a user has
+// no password, submitting password="" works. OIDC-created users have
+// no password set, so /join is wide open: anyone can pick any user
+// from the dropdown and walk in. Rotating to a strong random value
+// (which we never persist) closes that path; OIDC becomes the only
+// way into the world.
+function randomPassword() {
+  return crypto.randomBytes(32).toString("hex");
+}
 
 const ROLE = {
   NONE: 0,
@@ -130,6 +142,22 @@ function asString(v) {
   return typeof v === "string" ? v : String(v);
 }
 
+// Always rotate the user's Foundry password on login. The new value
+// is random and thrown away — no one knows it, including us — so the
+// /join password form can never authenticate as this user again.
+// The OIDC-minted session cookie is the only way in.
+export async function lockUserPassword(existing) {
+  const ok = await applyUserChanges(existing, { password: randomPassword() });
+  if (ok) {
+    log.debug(`rotated password for ${existing.name}`);
+  } else {
+    log.warn(
+      `could not rotate password for ${existing.name}; /join may still accept empty password`,
+    );
+  }
+  return ok;
+}
+
 export async function syncUserAttributes(existing, claims, cfg) {
   if (!cfg.syncAttrs) return false;
   const changes = {};
@@ -233,7 +261,7 @@ export async function ensureUser(name, role) {
   }
 
   try {
-    const u = await cls.create({ name, role });
+    const u = await cls.create({ name, role, password: randomPassword() });
     log.info(
       `auto-created Foundry user: name=${name} role=${role} id=${u?.id ?? u?._id}`,
     );
