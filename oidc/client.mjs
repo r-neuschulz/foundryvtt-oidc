@@ -1,25 +1,24 @@
-import { Issuer, generators } from "openid-client";
+import * as oidc from "openid-client";
 import { log } from "./log.mjs";
 
-let cachedClient = null;
+let cachedConfig = null;
 
-export async function getOidcClient(cfg) {
-  if (cachedClient) return cachedClient;
+export async function getOidcConfig(cfg) {
+  if (cachedConfig) return cachedConfig;
 
   log.info(`discovering issuer: ${cfg.issuer}`);
-  const issuer = await Issuer.discover(cfg.issuer);
+  const config = await oidc.discovery(
+    new URL(cfg.issuer),
+    cfg.clientId,
+    cfg.clientSecret,
+  );
+  const md = config.serverMetadata();
   log.info(
-    `issuer discovered: authz=${issuer.metadata.authorization_endpoint} token=${issuer.metadata.token_endpoint}`,
+    `issuer discovered: authz=${md.authorization_endpoint} token=${md.token_endpoint}`,
   );
 
-  cachedClient = new issuer.Client({
-    client_id: cfg.clientId,
-    client_secret: cfg.clientSecret,
-    redirect_uris: [cfg.redirectUri],
-    response_types: ["code"],
-  });
-
-  return cachedClient;
+  cachedConfig = config;
+  return cachedConfig;
 }
 
-export { generators };
+export { oidc };

@@ -7,6 +7,6 @@
   "description": "OIDC SSO shim for Foundry VTT, loaded into the Foundry server process via NODE_OPTIONS=--import.",
   "main": "shim.mjs",
   "dependencies": {
-    "openid-client": "^5.7.1"
+    "openid-client": "^6.8.3"
   }
 }

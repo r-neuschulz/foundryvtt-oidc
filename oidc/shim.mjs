@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { loadConfig } from "./config.mjs";
-import { getOidcClient } from "./client.mjs";
+import { getOidcConfig } from "./client.mjs";
 import { registerRoutes } from "./routes.mjs";
 import { log } from "./log.mjs";
 
@@ -149,7 +149,7 @@ async function bootstrap() {
   log.debug("http/https createServer hooks installed");
 
   try {
-    await getOidcClient(cfg);
+    await getOidcConfig(cfg);
   } catch (err) {
     log.error(`issuer discovery failed: ${err.message}`);
     log.warn(

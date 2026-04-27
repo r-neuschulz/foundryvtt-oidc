@@ -1,4 +1,4 @@
-import { generators, getOidcClient } from "./client.mjs";
+import { oidc, getOidcConfig } from "./client.mjs";
 import { signState, verifyState } from "./state.mjs";
 import {
   ensureUser,
@@ -26,11 +26,11 @@ import { log } from "./log.mjs";
 
 export async function loginHandler(cfg, req, res) {
   try {
-    const client = await getOidcClient(cfg);
-    const state = generators.state();
-    const nonce = generators.nonce();
-    const codeVerifier = generators.codeVerifier();
-    const codeChallenge = generators.codeChallenge(codeVerifier);
+    const config = await getOidcConfig(cfg);
+    const state = oidc.randomState();
+    const nonce = oidc.randomNonce();
+    const codeVerifier = oidc.randomPKCECodeVerifier();
+    const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
     const returnTo = safeReturnTo(parseQuery(req).get("returnTo"));
 
     const cookie = signState(
@@ -39,7 +39,8 @@ export async function loginHandler(cfg, req, res) {
     );
     setStateCookie(res, cfg.cookieName, cookie, cfg.cookieSecure);
 
-    const url = client.authorizationUrl({
+    const url = oidc.buildAuthorizationUrl(config, {
+      redirect_uri: cfg.redirectUri,
       scope: cfg.scopes,
       state,
       nonce,
@@ -47,8 +48,9 @@ export async function loginHandler(cfg, req, res) {
       code_challenge_method: "S256",
     });
 
-    log.debug(`/oidc/login -> redirect ${url.slice(0, 120)}...`);
-    redirect(res, url);
+    const href = url.toString();
+    log.debug(`/oidc/login -> redirect ${href.slice(0, 120)}...`);
+    redirect(res, href);
   } catch (err) {
     log.error("login handler failed:", err);
     try {
@@ -80,15 +82,20 @@ export async function callbackHandler(cfg, req, res) {
     if (!stateData) throw new Error("missing or invalid state cookie");
     clearStateCookie(res, cfg.cookieName);
 
-    const client = await getOidcClient(cfg);
-    const params = client.callbackParams(req);
-    const tokenSet = await client.callback(cfg.redirectUri, params, {
-      state: stateData.state,
-      nonce: stateData.nonce,
-      code_verifier: stateData.codeVerifier,
+    const config = await getOidcConfig(cfg);
+    // openid-client v6 reads the auth response off a URL or Request.
+    // Foundry's req has the path+query in req.url; reconstruct the absolute
+    // URL using cfg.redirectUri's origin so the lib can extract `code`/`state`.
+    const currentUrl = new URL(req.url, new URL(cfg.redirectUri).origin);
+    const tokenSet = await oidc.authorizationCodeGrant(config, currentUrl, {
+      expectedState: stateData.state,
+      expectedNonce: stateData.nonce,
+      pkceCodeVerifier: stateData.codeVerifier,
+      idTokenExpected: true,
     });
 
     const claims = tokenSet.claims();
+    if (!claims) throw new Error("authorization response had no ID token");
     const username = claims[cfg.usernameClaim];
     if (!username || typeof username !== "string") {
       throw new Error(
@@ -158,14 +165,12 @@ export async function logoutHandler(cfg, req, res) {
 
     let target = "/";
     try {
-      const client = await getOidcClient(cfg);
-      const endSession = client.issuer.metadata.end_session_endpoint;
-      if (endSession) {
-        const u = new URL(endSession);
-        u.searchParams.set("client_id", cfg.clientId);
+      const config = await getOidcConfig(cfg);
+      if (config.serverMetadata().end_session_endpoint) {
+        const params = {};
         const post = postLogoutRedirect(req, cfg);
-        if (post) u.searchParams.set("post_logout_redirect_uri", post);
-        target = u.toString();
+        if (post) params.post_logout_redirect_uri = post;
+        target = oidc.buildEndSessionUrl(config, params).toString();
       }
     } catch (e) {
       log.debug(`could not build IdP logout URL: ${e.message}`);
