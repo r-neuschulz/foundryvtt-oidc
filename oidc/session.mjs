@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { appendSetCookie, buildCookie } from "./cookies.mjs";
 import { log } from "./log.mjs";
 
 const SESSIONS_MODULE_URL = "file:///home/node/resources/app/dist/sessions.mjs";
@@ -6,7 +7,7 @@ const SESSION_MAX_AGE_MS = 864e5; // matches ClientSessions.COOKIE_MAX_AGE in Fo
 
 let sessionsSingleton = null;
 
-async function getSessionsSingleton() {
+export async function getSessionsSingleton() {
   if (sessionsSingleton) return sessionsSingleton;
   try {
     const m = await import(SESSIONS_MODULE_URL);
@@ -20,13 +21,6 @@ async function getSessionsSingleton() {
     log.error(`Failed to import Foundry sessions module: ${e.message}`);
     return null;
   }
-}
-
-function appendSetCookie(res, header) {
-  const existing = res.getHeader("Set-Cookie");
-  if (!existing) res.setHeader("Set-Cookie", header);
-  else if (Array.isArray(existing)) res.setHeader("Set-Cookie", [...existing, header]);
-  else res.setHeader("Set-Cookie", [existing, header]);
 }
 
 export async function mintSession(user, res, cfg, { admin = false } = {}) {
@@ -54,7 +48,9 @@ export async function mintSession(user, res, cfg, { admin = false } = {}) {
   };
 
   sessions.sessions.set(id, sessionData);
-  log.info(`session minted: id=${id} user=${userId} world=${worldId} admin=${!!admin}`);
+  log.info(
+    `session minted: id=${id} user=${userId} world=${worldId} admin=${!!admin}`,
+  );
 
   // Best-effort: notify world activity layer that this user has logged in
   try {
@@ -66,14 +62,17 @@ export async function mintSession(user, res, cfg, { admin = false } = {}) {
     log.warn(`world.onUserLogin failed (non-fatal): ${e.message}`);
   }
 
-  const cookieParts = [
-    `${cfg.foundrySessionCookie}=${id}`,
-    `Max-Age=${Math.floor(SESSION_MAX_AGE_MS / 1000)}`,
-    `Path=/`,
-    `SameSite=Strict`,
-  ];
-  if (cfg.cookieSecure) cookieParts.push("Secure");
-  appendSetCookie(res, cookieParts.join("; "));
+  // Match Foundry's own ClientSessions.assign() byte-for-byte: no HttpOnly
+  // (Foundry's client JS expects to read this cookie); SameSite=Strict.
+  appendSetCookie(
+    res,
+    buildCookie(cfg.foundrySessionCookie, id, {
+      maxAge: SESSION_MAX_AGE_MS,
+      path: "/",
+      sameSite: "Strict",
+      secure: cfg.cookieSecure,
+    }),
+  );
 
   return id;
 }

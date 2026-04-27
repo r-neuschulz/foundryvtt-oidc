@@ -2,14 +2,13 @@ import http from "node:http";
 import https from "node:https";
 import { loadConfig } from "./config.mjs";
 import { getOidcClient } from "./client.mjs";
-import { registerRoutes, dumpStack } from "./routes.mjs";
+import { registerRoutes } from "./routes.mjs";
 import { log } from "./log.mjs";
 
 const POLL_INTERVAL_MS = 100;
 const POLL_TIMEOUT_MS = 60_000;
 
 let capturedApp = null;
-let capturedServer = null;
 
 function isExpressApp(fn) {
   return (
@@ -17,10 +16,17 @@ function isExpressApp(fn) {
     typeof fn.use === "function" &&
     typeof fn.get === "function" &&
     typeof fn.post === "function" &&
-    (typeof fn.handle === "function" || typeof fn.lazyrouter === "function" || fn._router !== undefined || fn.router !== undefined)
+    (typeof fn.handle === "function" ||
+      typeof fn.lazyrouter === "function" ||
+      fn._router !== undefined ||
+      fn.router !== undefined)
   );
 }
 
+// Foundry creates its express() app inside the dist bundle and never
+// exposes it on a global. By wrapping http.createServer at --import
+// time, we capture the request-listener (= the express app) at the
+// instant Foundry calls createServer(app).
 function hookCreateServer() {
   const wrap = (mod) => {
     const orig = mod.createServer;
@@ -30,14 +36,14 @@ function hookCreateServer() {
         if (isExpressApp(a)) {
           if (!capturedApp) {
             capturedApp = a;
-            log.info(`Express app captured via ${mod === http ? "http" : "https"}.createServer hook`);
+            log.info(
+              `Express app captured via ${mod === http ? "http" : "https"}.createServer hook`,
+            );
           }
           break;
         }
       }
-      const server = orig.apply(this, args);
-      if (!capturedServer) capturedServer = server;
-      return server;
+      return orig.apply(this, args);
     };
     Object.defineProperty(wrapped, "__oidc_wrapped__", { value: true });
     Object.defineProperty(mod, "createServer", {
@@ -88,12 +94,7 @@ function scanActiveHandles() {
 }
 
 function locateExpressApp() {
-  if (capturedApp) return capturedApp;
-  const fromGlobals = scanGlobals();
-  if (fromGlobals) return fromGlobals;
-  const fromHandles = scanActiveHandles();
-  if (fromHandles) return fromHandles;
-  return null;
+  return capturedApp ?? scanGlobals() ?? scanActiveHandles();
 }
 
 function waitForExpressApp() {
@@ -118,39 +119,13 @@ function waitForExpressApp() {
   });
 }
 
+// felddy spawns several short-lived Node helper scripts during install
+// (authenticate.js, get_release_url.js, set_options.js, ...) and our
+// shim is loaded into every one of them via NODE_OPTIONS. Bail out
+// fast unless we're actually inside Foundry's main process.
 function isLikelyFoundryServerProcess() {
   const argv1 = process.argv[1] || "";
   return /main\.mjs$/i.test(argv1) || /resources\/app/i.test(argv1);
-}
-
-function dumpDiagnostics() {
-  try {
-    const handles = process._getActiveHandles?.() ?? [];
-    const summary = handles.slice(0, 20).map((h, i) => {
-      try {
-        return {
-          i,
-          ctor: h?.constructor?.name,
-          reqListeners: h?.listeners?.("request")?.length,
-        };
-      } catch {
-        return { i, err: "introspection failed" };
-      }
-    });
-    log.info("active handles:", JSON.stringify(summary));
-    log.info(
-      "globalThis keys (truncated):",
-      Object.keys(globalThis).slice(0, 50).join(","),
-    );
-    if (globalThis.config) {
-      log.info(
-        "globalThis.config keys:",
-        Object.keys(globalThis.config).slice(0, 30).join(","),
-      );
-    }
-  } catch (e) {
-    log.error(`diagnostics dump failed: ${e.message}`);
-  }
 }
 
 async function bootstrap() {
@@ -187,16 +162,24 @@ async function bootstrap() {
     app = await waitForExpressApp();
   } catch (err) {
     log.error(err.message);
-    if (cfg.debug) dumpDiagnostics();
+    if (cfg.debug) {
+      const { dumpActiveHandles } = await import("./diagnostics.mjs");
+      dumpActiveHandles();
+    }
     return;
   }
 
   log.info(`Express app located. has _router=${!!app._router}`);
 
   try {
-    if (cfg.debug) dumpStack(app, "stack BEFORE register");
-    registerRoutes(app, cfg);
-    if (cfg.debug) dumpStack(app, "stack AFTER register+promote");
+    if (cfg.debug) {
+      const { dumpStack } = await import("./diagnostics.mjs");
+      dumpStack(app, "stack BEFORE register");
+      registerRoutes(app, cfg);
+      dumpStack(app, "stack AFTER register+promote");
+    } else {
+      registerRoutes(app, cfg);
+    }
     log.info("OIDC shim active.");
   } catch (err) {
     log.error("route registration failed:", err);

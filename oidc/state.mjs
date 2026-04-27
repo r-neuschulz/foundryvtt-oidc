@@ -1,5 +1,13 @@
 import crypto from "node:crypto";
 
+// The state cookie is signed with cfg.stateSecret. config.mjs derives
+// stateSecret from a dedicated OIDC_STATE_SECRET env var when set, or
+// falls back to a key derived from the OIDC client secret + a fixed
+// info string. The latter is not as good as a separate secret, but
+// it's better than reusing the raw client secret directly: rotating
+// it has the same effect (existing in-flight states invalidate) but
+// the derived key is a different value than the secret on the wire.
+
 function deriveKey(secret) {
   return crypto.createHash("sha256").update(`oidc-state:${secret}`).digest();
 }

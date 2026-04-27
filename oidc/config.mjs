@@ -56,6 +56,11 @@ export function loadConfig() {
     cookieName: optional("OIDC_COOKIE_NAME", "oidc_state"),
     cookieSecure: bool("OIDC_COOKIE_SECURE", true),
     foundrySessionCookie: optional("FOUNDRY_SESSION_COOKIE", "session"),
+    // State-cookie HMAC key. Use OIDC_STATE_SECRET if set; else derive
+    // from the client secret with a distinguishing salt so the on-wire
+    // state signing key isn't literally the OIDC client_secret.
+    stateSecret:
+      optional("OIDC_STATE_SECRET", "") || `derived:${clientSecret}`,
     debug: bool("OIDC_DEBUG", false),
   };
 

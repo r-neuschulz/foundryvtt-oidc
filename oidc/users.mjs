@@ -34,7 +34,6 @@ function getUserClass() {
 export async function findUserByName(name) {
   const cls = getUserClass();
   if (!cls) return null;
-  const lower = name.toLowerCase();
 
   if (typeof cls.findOne === "function") {
     try {
@@ -45,11 +44,13 @@ export async function findUserByName(name) {
     }
   }
 
+  // Fallback only if findOne isn't available; use exact-case match to
+  // stay consistent with findOne (Foundry's name field is case-sensitive).
   if (typeof cls.find === "function") {
     try {
       const all = await cls.find({});
       if (Array.isArray(all)) {
-        const u = all.find((x) => (x?.name || "").toLowerCase() === lower);
+        const u = all.find((x) => x?.name === name);
         if (u) return u;
       }
     } catch (e) {
@@ -63,9 +64,15 @@ export async function findUserByName(name) {
 function isWorldActive() {
   const cls = getUserClass();
   if (!cls) return false;
-  if (typeof cls.connected !== "undefined" && cls.connected === false) return false;
+  if (typeof cls.connected !== "undefined" && cls.connected === false)
+    return false;
   if (typeof cls.ready !== "undefined" && cls.ready === false) return false;
-  if (typeof globalThis.game?.active !== "undefined" && globalThis.game.active === false) return false;
+  if (
+    typeof globalThis.game?.active !== "undefined" &&
+    globalThis.game.active === false
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -76,7 +83,9 @@ async function applyUserChanges(existing, changes) {
       await existing.update(changes);
       return true;
     } catch (e) {
-      log.debug(`existing.update(${JSON.stringify(Object.keys(changes))}) failed: ${e.message}`);
+      log.debug(
+        `existing.update(${JSON.stringify(Object.keys(changes))}) failed: ${e.message}`,
+      );
     }
   }
   if (
@@ -132,7 +141,9 @@ export async function syncUserAttributes(existing, claims, cfg) {
   if (!Object.keys(changes).length) return false;
   const ok = await applyUserChanges(existing, changes);
   if (ok) {
-    log.info(`synced attrs for ${existing.name}: ${Object.keys(changes).join(", ")}`);
+    log.info(
+      `synced attrs for ${existing.name}: ${Object.keys(changes).join(", ")}`,
+    );
   } else {
     log.warn(`could not sync attrs for ${existing.name}`);
   }
@@ -156,20 +167,27 @@ async function elevateUserRole(existing, targetRole) {
   return false;
 }
 
+// Result discriminator instead of mixed null / sentinel-object / User returns.
+//   { kind: "user", user }            -> success
+//   { kind: "no_world" }              -> Foundry has no world loaded
+//   { kind: "no_api" }                -> User class missing .create
+//   { kind: "create_failed", error }  -> .create threw
 export async function ensureUser(name, role) {
   if (!isWorldActive()) {
     log.error(
       `No active Foundry world. The User database is unavailable until a world is loaded. ` +
         `Sign in to Foundry as admin once and launch a world; subsequent OIDC logins will work.`,
     );
-    return { _noWorld: true };
+    return { kind: "no_world" };
   }
 
   const existing = await findUserByName(name);
   if (existing) {
-    log.info(`existing user matched: name=${name} id=${existing.id ?? existing._id}`);
+    log.info(
+      `existing user matched: name=${name} id=${existing.id ?? existing._id}`,
+    );
     await elevateUserRole(existing, role);
-    return existing;
+    return { kind: "user", user: existing };
   }
 
   const cls = getUserClass();
@@ -178,60 +196,18 @@ export async function ensureUser(name, role) {
       `Cannot auto-create user '${name}': config.db.User.create not available. ` +
         `Set OIDC_DEBUG=1 to introspect global state.`,
     );
-    return null;
+    return { kind: "no_api" };
   }
 
   try {
     const u = await cls.create({ name, role });
-    log.info(`auto-created Foundry user: name=${name} role=${role} id=${u?.id ?? u?._id}`);
-    return u;
+    log.info(
+      `auto-created Foundry user: name=${name} role=${role} id=${u?.id ?? u?._id}`,
+    );
+    return { kind: "user", user: u };
   } catch (e) {
     log.error(`User.create failed for '${name}':`, e);
-    return null;
-  }
-}
-
-function shape(o, depth = 1) {
-  if (o == null) return null;
-  if (typeof o !== "object" && typeof o !== "function") return typeof o;
-  const keys = Object.keys(o).slice(0, 50);
-  const proto = Object.getPrototypeOf(o);
-  const protoKeys = proto && proto !== Object.prototype && proto !== Function.prototype
-    ? Object.getOwnPropertyNames(proto).filter((n) => n !== "constructor").slice(0, 40)
-    : [];
-  return {
-    ctor: o?.constructor?.name,
-    keys,
-    protoKeys,
-    size: o?.size ?? o?.length,
-  };
-}
-
-export function dumpGlobals() {
-  try {
-    const g = globalThis;
-    const out = {
-      hasGame: !!g.game,
-      hasConfig: !!g.config,
-      hasUser: !!g.User,
-      hasFoundry: !!g.foundry,
-      configKeys: g.config ? Object.keys(g.config).slice(0, 40) : null,
-      gameKeys: g.game ? Object.keys(g.game).slice(0, 40) : null,
-      foundryKeys: g.foundry ? Object.keys(g.foundry).slice(0, 40) : null,
-      gameUsers: shape(g.game?.users),
-      configDb: shape(g.config?.db),
-      configDbUser: shape(g.config?.db?.User),
-      configDbUsers: shape(g.config?.db?.users),
-      foundryDocuments: g.foundry?.documents
-        ? Object.keys(g.foundry.documents).slice(0, 30)
-        : null,
-      foundryDocumentsUser: shape(g.foundry?.documents?.User),
-    };
-    log.info("dumpGlobals:", out);
-    return out;
-  } catch (e) {
-    log.error("dumpGlobals failed:", e);
-    return null;
+    return { kind: "create_failed", error: e };
   }
 }
 
