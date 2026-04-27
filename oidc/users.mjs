@@ -98,23 +98,33 @@ function isValidHexColor(s) {
   return typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
 }
 
+function asString(v) {
+  if (v == null) return "";
+  return typeof v === "string" ? v : String(v);
+}
+
 export async function syncUserAttributes(existing, claims, cfg) {
   if (!cfg.syncAttrs) return false;
   const changes = {};
 
   if (cfg.avatarClaim) {
     const v = claims[cfg.avatarClaim];
-    if (typeof v === "string" && v && v !== existing.avatar) changes.avatar = v;
+    if (typeof v === "string" && v && v !== asString(existing.avatar)) {
+      changes.avatar = v;
+    }
   }
   if (cfg.pronounsClaim) {
     const v = claims[cfg.pronounsClaim];
-    if (typeof v === "string" && v !== (existing.pronouns ?? "")) changes.pronouns = v;
+    if (typeof v === "string" && v !== asString(existing.pronouns)) {
+      changes.pronouns = v;
+    }
   }
   if (cfg.colorClaim) {
     const v = claims[cfg.colorClaim];
-    if (isValidHexColor(v) && v.toLowerCase() !== (existing.color ?? "").toLowerCase()) {
-      changes.color = v;
-    } else if (v && !isValidHexColor(v)) {
+    if (isValidHexColor(v)) {
+      const current = asString(existing.color).toLowerCase();
+      if (v.toLowerCase() !== current) changes.color = v;
+    } else if (v) {
       log.debug(`color claim '${v}' is not a valid #rrggbb hex; ignored`);
     }
   }
