@@ -1,4 +1,5 @@
 import { log } from "./log.mjs";
+import { setAvatarUrl } from "./avatar-map.mjs";
 
 const ROLE = {
   NONE: 0,
@@ -107,6 +108,23 @@ function isValidHexColor(s) {
   return typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
 }
 
+// Foundry's User.avatar validator requires a recognized image file
+// extension. Keycloak's `picture` claim is often a Gravatar/proxy URL
+// with no extension (e.g. `/avatar/<hash>`), which would fail validation
+// and — because changes are applied as one batch — also block sibling
+// fields (pronouns, color) from saving. Pre-check here so we can drop
+// just the avatar field and let the rest sync.
+function isValidAvatarUrl(s) {
+  if (typeof s !== "string" || !s) return false;
+  let pathname;
+  try {
+    pathname = new URL(s).pathname;
+  } catch {
+    pathname = s;
+  }
+  return /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(pathname);
+}
+
 function asString(v) {
   if (v == null) return "";
   return typeof v === "string" ? v : String(v);
@@ -118,8 +136,23 @@ export async function syncUserAttributes(existing, claims, cfg) {
 
   if (cfg.avatarClaim) {
     const v = claims[cfg.avatarClaim];
-    if (typeof v === "string" && v && v !== asString(existing.avatar)) {
-      changes.avatar = v;
+    if (typeof v === "string" && v) {
+      const userId = existing.id ?? existing._id;
+      if (isValidAvatarUrl(v)) {
+        if (v !== asString(existing.avatar)) changes.avatar = v;
+      } else if (userId) {
+        // Upstream URL has no recognized image extension (e.g. Keycloak's
+        // /avatar/<hash>). Persist the upstream URL so /oidc/avatar/<id>.png
+        // can resolve it, and point user.avatar at that proxy route.
+        const proxyUrl = `/oidc/avatar/${userId}.png`;
+        if (proxyUrl !== asString(existing.avatar)) changes.avatar = proxyUrl;
+        const wrote = await setAvatarUrl(userId, v);
+        if (wrote) {
+          log.info(
+            `avatar proxied for ${existing.name}: upstream=${v.length > 80 ? v.slice(0, 77) + "..." : v}`,
+          );
+        }
+      }
     }
   }
   if (cfg.pronounsClaim) {

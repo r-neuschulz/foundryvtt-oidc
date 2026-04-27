@@ -3,6 +3,7 @@ import {
   callbackHandler,
   logoutHandler,
   joinInterceptor,
+  avatarProxyHandler,
 } from "./handlers.mjs";
 import { sendJson } from "./http-utils.mjs";
 import { log } from "./log.mjs";
@@ -13,6 +14,9 @@ export function registerRoutes(app, cfg) {
   app.get("/oidc/logout", (req, res) => logoutHandler(cfg, req, res));
   app.get("/oidc/health", (req, res) =>
     sendJson(res, 200, { ok: true, issuer: cfg.issuer }),
+  );
+  app.get("/oidc/avatar/:file", (req, res) =>
+    avatarProxyHandler(cfg, req, res),
   );
 
   app.get("/join", (req, res, next) => joinInterceptor(cfg, req, res, next));
@@ -28,6 +32,7 @@ export function registerRoutes(app, cfg) {
     "/oidc/callback",
     "/oidc/logout",
     "/oidc/health",
+    "/oidc/avatar/:file",
   ]) {
     promoteRouteToFront(app, p);
   }

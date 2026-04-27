@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { oidc, getOidcConfig } from "./client.mjs";
 import { signState, verifyState } from "./state.mjs";
 import {
@@ -7,6 +8,7 @@ import {
   syncUserAttributes,
 } from "./users.mjs";
 import { mintSession } from "./session.mjs";
+import { getAvatarUrl } from "./avatar-map.mjs";
 import {
   readCookie,
   setStateCookie,
@@ -193,6 +195,60 @@ function postLogoutRedirect(req, cfg) {
     req.headers["x-forwarded-proto"] ||
     (cfg.cookieSecure ? "https" : "http");
   return `${proto}://${host}/`;
+}
+
+// Streaming proxy for avatars whose upstream URL has no recognizable
+// image extension (e.g. Keycloak/Gravatar `/avatar/<hash>` endpoints).
+// Foundry's User.avatar validator inspects the URL string, so we stash
+// the real upstream in avatar-map.mjs and point user.avatar at this
+// route, which always ends in `.png` to satisfy the validator.
+const AVATAR_PROXY_TIMEOUT_MS = 10_000;
+
+export async function avatarProxyHandler(cfg, req, res) {
+  try {
+    const url = new URL(req.url, "http://x");
+    const last = url.pathname.split("/").pop() || "";
+    const userId = last.replace(/\.[^.]+$/, "");
+    if (!userId) return sendText(res, 404, "not found");
+
+    const upstream = await getAvatarUrl(userId);
+    if (!upstream) return sendText(res, 404, "no picture for this user");
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AVATAR_PROXY_TIMEOUT_MS);
+    let upstreamRes;
+    try {
+      upstreamRes = await fetch(upstream, {
+        redirect: "follow",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!upstreamRes.ok) {
+      return sendText(res, 502, `upstream ${upstreamRes.status}`);
+    }
+    const ct =
+      upstreamRes.headers.get("content-type") || "application/octet-stream";
+    if (!ct.startsWith("image/")) {
+      return sendText(res, 502, `upstream returned non-image (${ct})`);
+    }
+
+    res.writeHead(200, {
+      "content-type": ct,
+      "cache-control": "private, max-age=300",
+    });
+    if (upstreamRes.body) {
+      Readable.fromWeb(upstreamRes.body).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch (err) {
+    log.error("avatar proxy failed:", err);
+    try {
+      sendText(res, 500, `avatar proxy failed: ${err.message}`);
+    } catch {}
+  }
 }
 
 export function joinInterceptor(cfg, req, res, next) {
