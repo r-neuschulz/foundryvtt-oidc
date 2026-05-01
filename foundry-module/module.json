@@ -1,0 +1,15 @@
+{
+  "id": "foundryvtt-oidc-logout",
+  "title": "OIDC Logout Override",
+  "description": "Routes Foundry's Log Out button through the OIDC shim's /oidc/logout endpoint, so a click ends both the Foundry session and the IdP (Keycloak) SSO session in one step. Without this module the button just navigates to /join, which the shim's auto-redirect would re-authenticate immediately via the still-live IdP session.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "13",
+    "maximum": "13"
+  },
+  "esmodules": ["oidc-logout.mjs"],
+  "authors": [{ "name": "r-neuschulz" }],
+  "url": "https://github.com/r-neuschulz/foundryvtt-oidc",
+  "library": true
+}

@@ -184,6 +184,15 @@ async function bootstrap() {
   } catch (err) {
     log.error("route registration failed:", err);
   }
+
+  // Install the bundled Foundry module that overrides game.logOut().
+  // Best-effort; failures are warnings, never fatal.
+  try {
+    const { installLogoutModule } = await import("./install-module.mjs");
+    await installLogoutModule();
+  } catch (e) {
+    log.warn(`logout module install skipped: ${e.message}`);
+  }
 }
 
 bootstrap().catch((err) => {
