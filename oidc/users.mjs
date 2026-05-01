@@ -211,19 +211,20 @@ export async function syncUserAttributes(existing, claims, cfg) {
   return ok;
 }
 
-async function elevateUserRole(existing, targetRole) {
+async function setUserRole(existing, targetRole) {
+  if (typeof targetRole !== "number") return false;
   const currentRole = existing?.role ?? 0;
-  if (typeof targetRole !== "number" || targetRole <= currentRole) return false;
+  if (targetRole === currentRole) return false;
 
   const ok = await applyUserChanges(existing, { role: targetRole });
   if (ok) {
     log.info(
-      `elevated user ${existing.name}: role ${currentRole} -> ${targetRole}`,
+      `synced role for ${existing.name}: ${currentRole} -> ${targetRole}`,
     );
     return true;
   }
   log.warn(
-    `could not elevate role for '${existing.name}' (current=${currentRole}, target=${targetRole}); admin must promote manually in /players`,
+    `could not sync role for '${existing.name}' (current=${currentRole}, target=${targetRole})`,
   );
   return false;
 }
@@ -247,7 +248,7 @@ export async function ensureUser(name, role) {
     log.info(
       `existing user matched: name=${name} id=${existing.id ?? existing._id}`,
     );
-    await elevateUserRole(existing, role);
+    await setUserRole(existing, role);
     return { kind: "user", user: existing };
   }
 
