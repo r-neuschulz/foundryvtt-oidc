@@ -4,6 +4,7 @@ import {
   logoutHandler,
   joinInterceptor,
   avatarProxyHandler,
+  playersRedirectHandler,
 } from "./handlers.mjs";
 import { sendJson } from "./http-utils.mjs";
 import { log } from "./log.mjs";
@@ -20,6 +21,9 @@ export function registerRoutes(app, cfg) {
   );
 
   app.get("/join", (req, res, next) => joinInterceptor(cfg, req, res, next));
+  app.get("/players", (req, res, next) =>
+    playersRedirectHandler(cfg, req, res, next),
+  );
 
   // Foundry's view routes (/join, /game, ...) live in a child express.Router()
   // mounted on the outer app. Our app.get(path, handler) lands at the *end*
@@ -33,12 +37,13 @@ export function registerRoutes(app, cfg) {
     "/oidc/logout",
     "/oidc/health",
     "/oidc/avatar/:file",
+    "/players",
   ]) {
     promoteRouteToFront(app, p);
   }
 
   log.info(
-    `routes registered: /oidc/login, /oidc/callback, /oidc/logout, /oidc/health` +
+    `routes registered: /oidc/login, /oidc/callback, /oidc/logout, /oidc/health, /players` +
       (cfg.autoRedirect ? `, /join (auto-redirect)` : ""),
   );
 }

@@ -8,7 +8,7 @@ import {
   syncUserAttributes,
   lockUserPassword,
 } from "./users.mjs";
-import { mintSession } from "./session.mjs";
+import { mintSession, getSessionsSingleton } from "./session.mjs";
 import { getAvatarUrl } from "./avatar-map.mjs";
 import {
   readCookie,
@@ -154,12 +154,22 @@ export async function callbackHandler(cfg, req, res) {
 // browser would silently re-authenticate.
 export async function logoutHandler(cfg, req, res) {
   try {
-    // Drop our minted session from Foundry's in-memory map
+    // Run Foundry's own logoutWorld() first so onUserLogout / activity
+    // deactivation fires (other clients see the user leave). Then drop
+    // our minted session entry entirely.
     try {
-      const { getSessionsSingleton } = await import("./session.mjs");
       const sessions = await getSessionsSingleton();
       const sid = readCookie(req, cfg.foundrySessionCookie);
-      if (sessions && sid) sessions.sessions.delete(sid);
+      if (sessions && sid) {
+        if (typeof sessions.logoutWorld === "function") {
+          try {
+            await sessions.logoutWorld(req, res);
+          } catch (e) {
+            log.debug(`sessions.logoutWorld failed: ${e.message}`);
+          }
+        }
+        sessions.sessions.delete(sid);
+      }
     } catch (e) {
       log.debug(`session map cleanup skipped: ${e.message}`);
     }
@@ -253,14 +263,71 @@ export async function avatarProxyHandler(cfg, req, res) {
   }
 }
 
-export function joinInterceptor(cfg, req, res, next) {
+// Keycloak's issuer is `<base>/realms/<realm>`; the admin console's
+// Groups page is conventional and stable. Not in OIDC discovery
+// metadata (it's vendor UX, not protocol).
+function deriveKeycloakAdminGroupsUrl(issuer) {
+  if (typeof issuer !== "string") return "";
+  const m = issuer.match(/^(https?:\/\/[^/]+)\/realms\/([^/]+)\/?$/);
+  if (!m) return "";
+  return `${m[1]}/admin/master/console/#/${m[2]}/groups`;
+}
+
+let cachedDerivedUrl;
+async function resolvePlayersRedirectUrl(cfg) {
+  if (cfg.playersRedirectUrl) return cfg.playersRedirectUrl;
+  if (cachedDerivedUrl !== undefined) return cachedDerivedUrl;
+  try {
+    const oidcConfig = await getOidcConfig(cfg);
+    const issuer = oidcConfig.serverMetadata()?.issuer;
+    cachedDerivedUrl = deriveKeycloakAdminGroupsUrl(issuer);
+  } catch (e) {
+    log.debug(`could not derive players redirect URL: ${e.message}`);
+    cachedDerivedUrl = "";
+  }
+  return cachedDerivedUrl;
+}
+
+export async function playersRedirectHandler(cfg, req, res, next) {
+  const target = await resolvePlayersRedirectUrl(cfg);
+  if (!target) return next();
+  log.debug(`/players -> 302 ${target}`);
+  return redirect(res, target);
+}
+
+export async function joinInterceptor(cfg, req, res, next) {
   if (req.method !== "GET") return next();
   if (!cfg.autoRedirect) return next();
   const q = parseQuery(req);
   if (q.has(cfg.bypassQuery)) return next();
   if (q.get("from") === "oidc") return next();
+
   const sessionCookie = readCookie(req, cfg.foundrySessionCookie);
-  if (sessionCookie) return next();
+  if (sessionCookie) {
+    // Authed session: skip Foundry's user-picker form entirely and jump
+    // to /game. Logout no longer needs handling here — the bundled
+    // foundryvtt-oidc-logout module rewrites game.logOut() so the Log
+    // Out button hits /oidc/logout directly, never /join.
+    //
+    // Foundry mints anonymous "client sessions" for any visitor — those
+    // land in the sessions Map but have no user binding for the world,
+    // so /game would bounce them to /join (loop). Only short-circuit
+    // when the session is bound to a user in the active world.
+    try {
+      const sessions = await getSessionsSingleton();
+      const session = sessions?.sessions?.get(sessionCookie);
+      const worldId = globalThis.game?.world?.id;
+      if (worldId && session?.worlds?.[worldId]) {
+        log.debug(`/join (authed) -> 302 /game`);
+        return redirect(res, "/game");
+      }
+    } catch (e) {
+      log.debug(`session validation failed: ${e.message}`);
+    }
+    // Anonymous/expired session: Foundry manages the cookie's lifecycle;
+    // the OIDC callback will overwrite it with a real world+user binding.
+  }
+
   log.debug(`/join -> 302 /oidc/login`);
   return redirect(res, "/oidc/login?returnTo=/game");
 }

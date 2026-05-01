@@ -53,6 +53,9 @@ export function loadConfig() {
     avatarClaim: optional("OIDC_AVATAR_CLAIM", "picture"),
     pronounsClaim: optional("OIDC_PRONOUNS_CLAIM", ""),
     colorClaim: optional("OIDC_COLOR_CLAIM", ""),
+    // Explicit override; when empty, the players handler derives from
+    // the discovered well-known issuer (Keycloak only).
+    playersRedirectUrl: optional("OIDC_PLAYERS_REDIRECT_URL", ""),
     cookieName: optional("OIDC_COOKIE_NAME", "oidc_state"),
     cookieSecure: bool("OIDC_COOKIE_SECURE", true),
     foundrySessionCookie: optional("FOUNDRY_SESSION_COOKIE", "session"),
